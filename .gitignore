@@ -1,0 +1,29 @@
+# Secretos / configuración local
+.env
+
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Tests / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Editor
+.vscode/
+.idea/
+
+# Salidas generadas por Miner (opcional, evita subir CSV grandes por accidente)
+*.csv
+!examples/*.csv
