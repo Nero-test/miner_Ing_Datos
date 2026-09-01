@@ -134,6 +134,48 @@ cantidad de repositorios que no pudieron resolverse (por ejemplo, por no
 encontrarse o por errores de red) — estos últimos **no** se cuentan como
 "no usa GH-AW", ya que no fue posible confirmarlo.
 
+## REST vs GraphQL
+
+Miner soporta dos formas de consultar GitHub, elegibles con `--api`:
+
+- **`graphql`** (por defecto): agrupa varios repositorios en una sola
+  solicitud HTTP (`--batch-size`, por defecto 50). Es muchísimo más eficiente
+  en cuota de API: revisar 500.000 repos con lotes de 50 son ~10.000
+  solicitudes en vez de 500.000, muy por debajo del límite de puntos de
+  GraphQL (5.000/hora por token). Recomendado para volúmenes grandes.
+- **`rest`**: 1 solicitud por repositorio. Más simple de razonar, pero el
+  límite real termina siendo la cantidad de solicitudes (5.000/hora por
+  token), no la cantidad de repos por solicitud.
+
+```bash
+miner repositorios_500k.csv --output repositorios_ghaw.csv --api graphql --batch-size 50
+```
+
+### Aislamiento de fallos en modo GraphQL
+
+Un lote GraphQL agrupa muchos repositorios en una sola solicitud, así que
+hay que evitar que **un solo repositorio problemático arruine el resultado
+de todos los demás del mismo lote** (por ejemplo, un timeout puntual del
+servidor, o un repo cuyo contenido dispara un error al resolverlo).
+
+Miner nunca descarta un lote completo por esto. Si un lote falla de forma
+persistente:
+
+1. Primero reintenta el lote completo (la falla puede ser transitoria y
+   no ser culpa de ningún repo en particular).
+2. Si sigue fallando, **lo divide a la mitad** y resuelve cada mitad por
+   separado, cada una con su propio presupuesto de reintentos.
+3. Repite la división recursivamente hasta aislar exactamente cuál repo (o
+   repos) es el problemático. El resto de los repos del lote original **sí
+   quedan resueltos correctamente en la misma corrida**.
+4. Solo el repo verdaderamente problemático queda marcado como pendiente
+   (no se pierde ni se ignora): el checkpoint lo retiene para reintentarlo
+   en la siguiente corrida.
+
+Esto está cubierto por pruebas automatizadas (`tests/test_graphql_client.py`)
+que simulan un repo que hace fallar la solicitud y verifican que los demás
+repos del lote se resuelven igual.
+
 ## Ejecutar Miner a gran escala (cientos de miles de repositorios)
 
 Miner procesa los repositorios en paralelo repartiendo la carga entre todos
@@ -144,16 +186,14 @@ si el proceso se corta.
 miner repositorios_500k.csv --output repositorios_ghaw.csv --concurrency-per-token 6
 ```
 
-- **`--concurrency-per-token`** (por defecto `4`): consultas simultáneas por
+- **`--concurrency-per-token`** (por defecto `4`): solicitudes simultáneas por
   cada token. Con 5 tokens y el valor por defecto se usan 20 hilos en total.
-  El límite real no es la cantidad de hilos sino la cuota de la API
-  (5.000 solicitudes/hora por token); subir mucho este número sin subir la
-  cantidad de tokens no acelera el proceso más allá de ese techo, y valores
-  demasiado altos pueden disparar el límite secundario de abuso de GitHub.
-  Con 5 tokens, la cuota combinada es de 25.000 solicitudes/hora, por lo que
-  revisar ~500.000 repositorios toma como mínimo unas 20 horas de cuota de
-  API, sin importar cuántos hilos uses — los hilos evitan que el tiempo real
-  sea mayor por la latencia de red, pero no pueden superar ese piso.
+  En modo `graphql`, cada solicitud cubre `--batch-size` repos a la vez, así
+  que el techo real de tiempo es mucho más bajo que en modo `rest` (donde
+  cada solicitud es 1 repo y 5 tokens dan ~25.000 repos/hora como máximo
+  teórico). Con GraphQL y lotes de 50, revisar ~500.000 repos puede tomar
+  del orden de minutos a poco más de una hora, en vez de las ~20 horas que
+  tomaría en modo `rest`.
 - **Checkpoint automático**: junto al CSV de salida, Miner crea un archivo
   `<output>.checkpoint.jsonl` con el resultado de cada fila apenas se
   resuelve. Si interrumpes la ejecución (`Ctrl+C`, corte de luz, cierre de

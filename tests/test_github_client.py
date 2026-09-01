@@ -12,7 +12,7 @@ def test_pool_requiere_al_menos_un_token():
 def test_rotacion_round_robin_entre_tokens_con_cuota():
     client = GitHubClient(["tok1", "tok2", "tok3"])
     try:
-        indices = [client._next_slot().index for _ in range(6)]
+        indices = [client._pool.next_slot().index for _ in range(6)]
         assert indices == [0, 1, 2, 0, 1, 2]
     finally:
         client.close()
@@ -21,9 +21,9 @@ def test_rotacion_round_robin_entre_tokens_con_cuota():
 def test_rotacion_salta_tokens_sin_cuota():
     client = GitHubClient(["tok1", "tok2", "tok3"])
     try:
-        client._slots[0].remaining = 0
-        client._slots[1].remaining = 0
-        slot = client._next_slot()
+        client._pool._slots[0].remaining = 0
+        client._pool._slots[1].remaining = 0
+        slot = client._pool.next_slot()
         assert slot.index == 2
     finally:
         client.close()
