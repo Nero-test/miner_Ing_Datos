@@ -31,3 +31,7 @@ htmlcov/
 # Dataset generado por 'miner extract' (se publica en Hugging Face, no en git)
 /dataset/
 *.parquet
+
+# Checkpoints de progreso interno (mine y extract) -- no son parte del
+# dataset ni del código, solo estado temporal para poder reanudar
+*.checkpoint.jsonl
