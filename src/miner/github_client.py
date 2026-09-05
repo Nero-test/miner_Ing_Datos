@@ -6,11 +6,13 @@ rate limit (5.000 req/hora autenticado), así que usar N tokens multiplica por
 N la cantidad de repositorios que se pueden consultar por hora sin esperar.
 
 Responsabilidad única: dado un owner/name, obtener la lista de nombres de
-archivo dentro de .github/workflows. No sabe nada de CSV ni de la lógica de
-detección de GH-AW (eso vive en detector.py).
+archivo dentro de .github/workflows, o el contenido de un archivo puntual.
+No sabe nada de CSV ni de la lógica de detección de GH-AW (eso vive en
+detector.py) ni de parseo de frontmatter (eso vive en markdown_extractor.py).
 """
 from __future__ import annotations
 
+import base64
 import time
 from typing import List, Optional
 
@@ -100,5 +102,48 @@ class GitHubClient:
                 continue
 
             return None  # error real (401, 5xx, etc.), no confundir con "no usa"
+
+        return None
+
+    def get_file_content(self, owner: str, name: str, path: str) -> Optional[str]:
+        """
+        Devuelve el contenido de texto plano de un archivo del repositorio
+        (por ejemplo, un .md de .github/workflows/).
+
+        Retorna:
+          str   contenido del archivo.
+          None  no se pudo obtener (no encontrado -- puede haberse borrado o
+                renombrado desde el escaneo anterior --, error de red
+                persistente, o rate limit no resuelto). Igual que en
+                list_workflow_files, None es "pendiente", no "no existe".
+        """
+        url = f"/repos/{owner}/{name}/contents/{path}"
+
+        for attempt in range(MAX_RETRIES):
+            slot = self._pool.next_slot()
+            try:
+                # Accept: application/vnd.github.raw devuelve el contenido
+                # como texto plano directamente, sin tener que decodificar
+                # base64 a mano.
+                response = slot.client.get(url, headers={"Accept": "application/vnd.github.raw"})
+            except httpx.HTTPError:
+                time.sleep(min(2 ** attempt, 30))
+                continue
+
+            slot.update_from_headers(response.headers)
+
+            if response.status_code == 200:
+                return response.text
+
+            if response.status_code == 404:
+                return None
+
+            if response.status_code in (403, 429):
+                if slot.remaining > 2:
+                    retry_after = response.headers.get("Retry-After")
+                    time.sleep(int(retry_after) + 2 if retry_after else 10)
+                continue
+
+            return None
 
         return None

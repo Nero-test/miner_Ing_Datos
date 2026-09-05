@@ -1,16 +1,15 @@
 """
-CLI de Miner: conecta lectura de CSV, consulta a GitHub y detección de GH-AW.
+CLI de Miner: dos subcomandos.
 
-Uso:
-    miner repositorios.csv --output repositorios_ghaw.csv
+  miner mine repositorios.csv --output repositorios_ghaw.csv
+      Identifica qué repositorios usan GH-AW (Tarea 2).
 
-Soporta dos formas de consultar GitHub:
-  --api rest     1 solicitud HTTP por repositorio (simple, más lenta a escala).
-  --api graphql  varios repositorios por solicitud (batching), con
-                 aislamiento de fallos: un repo problemático dentro de un
-                 lote no le cuesta el resultado a los demás del mismo lote.
+  miner extract repositorios_ghaw.csv --output-dir dataset/
+      Descarga los archivos .md de GH-AW de esos repos, separa frontmatter
+      de body, y genera un dataset relacional en Parquet (Tarea 3).
 
-Ambos modos usan varios tokens en paralelo y guardan progreso incremental
+Ambos comandos usan varios tokens en paralelo. 'mine' soporta dos formas de
+consultar GitHub (--api rest/graphql) y guarda progreso incremental
 (checkpoint) para poder reanudar si el proceso se interrumpe.
 """
 from __future__ import annotations
@@ -26,10 +25,14 @@ from dotenv import load_dotenv
 
 from miner.checkpoint import CheckpointWriter, default_checkpoint_path, load_checkpoint
 from miner.csv_io import detect_repo_column, read_candidates, write_csv
+from miner.dataset_builder import build_dataset_from_checkpoint
 from miner.detector import uses_gh_aw
+from miner.extract_checkpoint import ExtractCheckpointWriter, default_extract_checkpoint_path, load_extract_checkpoint
+from miner.extraction import extract_repo
 from miner.github_client import GitHubClient
 from miner.graphql_client import GitHubGraphQLClient
 from miner.models import RepoIdentifier
+from miner.parquet_writer import write_parquet_tables
 
 app = typer.Typer(
     add_completion=False,
@@ -200,7 +203,7 @@ def _run_graphql(
 
 
 @app.command()
-def main(
+def mine(
     input_csv: Path = typer.Argument(
         ...,
         exists=True,
@@ -321,6 +324,130 @@ def main(
             fg=typer.colors.YELLOW,
         )
     typer.echo(f"Archivo generado: {output}")
+
+
+# ------------------------------------------------------------------
+# Comando: extract
+# ------------------------------------------------------------------
+@app.command()
+def extract(
+    input_csv: Path = typer.Argument(
+        ...,
+        exists=True,
+        readable=True,
+        help="CSV de repositorios confirmados con GH-AW (la salida de 'miner mine').",
+    ),
+    output_dir: Path = typer.Option(
+        Path("dataset"),
+        "--output-dir",
+        "-d",
+        help="Carpeta donde se escriben las tablas .parquet del dataset.",
+    ),
+    column: Optional[str] = typer.Option(
+        None,
+        "--column",
+        "-c",
+        help="Nombre de la columna que identifica al repositorio (se autodetecta si se omite).",
+    ),
+    concurrency_per_token: int = typer.Option(
+        4,
+        "--concurrency-per-token",
+        min=1,
+        max=20,
+        help="Repositorios procesados simultáneamente por cada token cargado.",
+    ),
+    checkpoint_path: Optional[Path] = typer.Option(
+        None,
+        "--checkpoint",
+        help="Archivo de progreso incremental de la extracción (JSONL). Por defecto "
+        "se guarda dentro de --output-dir. Si ya existe, se reanuda desde ahí.",
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Ignora cualquier checkpoint de extracción previo y vuelve a descargar todo.",
+    ),
+) -> None:
+    """
+    Descarga los archivos .md de GH-AW de cada repositorio de INPUT_CSV,
+    separa frontmatter/body, y genera el dataset relacional (repositories,
+    workflow_files, frontmatter_attributes) como archivos .parquet en
+    --output-dir.
+    """
+    load_dotenv()
+    tokens = _load_tokens()
+    if not tokens:
+        typer.secho(
+            "Error: no se encontró ningún token de GitHub. Crea un archivo .env a "
+            "partir de .env.example y completa GITHUB_TOKENS (uno o varios, "
+            "separados por coma) o GITHUB_TOKEN.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Leyendo {input_csv}...")
+    df = read_candidates(input_csv)
+    repo_col = column or detect_repo_column(df)
+    total = len(df)
+    typer.echo(f"Columna de repositorio detectada: '{repo_col}' ({total} filas)")
+
+    max_workers = max(len(tokens) * concurrency_per_token, 1)
+    typer.echo(f"Tokens de GitHub cargados: {len(tokens)} | hilos totales: {max_workers}")
+
+    ckpt_path = checkpoint_path or default_extract_checkpoint_path(output_dir)
+    if fresh and ckpt_path.exists():
+        ckpt_path.unlink()
+
+    existing_records = load_extract_checkpoint(ckpt_path)
+    already_done = {key for key, record in existing_records.items() if record.get("status") == "ok"}
+    if already_done:
+        typer.echo(f"Checkpoint encontrado en {ckpt_path}: {len(already_done)} archivos .md ya descargados.")
+
+    total_errors = 0
+    completed = 0
+    report_every = max(total // 100, 1)
+
+    with GitHubClient(tokens) as client, ExtractCheckpointWriter(ckpt_path) as writer:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(extract_repo, client, writer, str(df.iloc[idx][repo_col]), already_done): idx
+                for idx in range(total)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    total_errors += future.result()
+                except Exception as exc:  # un repo problemático no debe tumbar la corrida
+                    typer.secho(f"[WARN] error inesperado en fila {idx}: {exc}", fg=typer.colors.YELLOW)
+                    total_errors += 1
+
+                completed += 1
+                if completed % report_every == 0 or completed == total:
+                    typer.echo(
+                        f"Progreso: {completed}/{total} repos ({completed / total * 100:.1f}%) "
+                        f"| errores hasta ahora: {total_errors}"
+                    )
+
+    typer.echo("Construyendo tablas del dataset a partir del checkpoint...")
+    final_records = load_extract_checkpoint(ckpt_path)
+    builder = build_dataset_from_checkpoint(final_records)
+    typer.echo(f"Repositorios con archivos extraídos: {builder.repo_count} | archivos .md: {builder.file_count}")
+
+    tables = builder.to_dataframes()
+    written = write_parquet_tables(tables, output_dir)
+
+    typer.echo("")
+    typer.secho("Dataset generado:", fg=typer.colors.GREEN)
+    for table_name, path in written.items():
+        typer.echo(f"  {table_name}: {path}")
+
+    if total_errors:
+        typer.secho(
+            f"{total_errors} archivos/repositorios sin resolver (quedaron registrados en "
+            f"{ckpt_path.name}, no se cuentan como 'sin frontmatter'). Vuelve a ejecutar el "
+            f"mismo comando para reintentarlos.",
+            fg=typer.colors.YELLOW,
+        )
 
 
 if __name__ == "__main__":

@@ -27,3 +27,7 @@ htmlcov/
 # Salidas generadas por Miner (opcional, evita subir CSV grandes por accidente)
 *.csv
 !examples/*.csv
+
+# Dataset generado por 'miner extract' (se publica en Hugging Face, no en git)
+/dataset/
+*.parquet
