@@ -87,3 +87,18 @@ class GHAWResult(BaseModel):
     # False -> confirmado que NO usa GH-AW
     # None  -> no se pudo determinar (repo no encontrado, error, rate limit persistente)
     uses_gh_aw: Optional[bool] = None
+
+
+class FrontmatterAttribute(BaseModel):
+    """
+    Un par clave-valor aplanado del frontmatter YAML de un workflow .md.
+
+    El frontmatter de gh-aw no tiene un esquema fijo (varía entre `on`,
+    `permissions`, `tools`, `engine`, etc., algunos anidados), así que en vez
+    de forzar columnas rígidas se representa como filas independientes con
+    notación de ruta ("permissions.contents", "on.schedule[0]").
+    """
+
+    key_path: str
+    value: str
+    value_type: str  # "str" | "int" | "float" | "bool" | "null" | "dict" | "list"

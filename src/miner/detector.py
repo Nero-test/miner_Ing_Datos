@@ -12,7 +12,7 @@ de archivo, lo que la hace trivial de probar con pytest.
 """
 from __future__ import annotations
 
-from typing import Iterable, List, Set
+from typing import Dict, Iterable, List, Set, Tuple
 
 
 def _split_base_and_kind(filename: str) -> tuple[str, str] | None:
@@ -72,3 +72,31 @@ def matching_pairs(filenames: Iterable[str]) -> List[str]:
             lock_bases.add(base)
 
     return sorted(md_bases & lock_bases)
+
+
+def matching_file_pairs(filenames: Iterable[str]) -> List[Tuple[str, str]]:
+    """
+    Como matching_pairs, pero devuelve pares (nombre_md, nombre_lock) con
+    los nombres de archivo ORIGINALES (preservando mayúsculas/minúsculas),
+    ordenados por nombre base para un resultado determinista. Necesario
+    para saber exactamente qué archivo .md descargar de GitHub (las rutas
+    son sensibles a mayúsculas).
+
+    Si hay más de un archivo con el mismo nombre base normalizado (ej.
+    distinta capitalización), se conserva el primero encontrado de cada
+    tipo, en el orden en que aparece `filenames`.
+    """
+    md_by_base: Dict[str, str] = {}
+    lock_by_base: Dict[str, str] = {}
+
+    for name in filenames:
+        classified = _split_base_and_kind(name)
+        if classified is None:
+            continue
+        base, kind = classified
+        if kind == "md":
+            md_by_base.setdefault(base, name)
+        else:
+            lock_by_base.setdefault(base, name)
+
+    return [(md_by_base[base], lock_by_base[base]) for base in sorted(md_by_base.keys() & lock_by_base.keys())]

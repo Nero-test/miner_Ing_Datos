@@ -2,14 +2,17 @@
 
 Miner es una aplicación de línea de comandos (CLI) en Python que automatiza la
 identificación de repositorios de GitHub que utilizan **GitHub Agentic
-Workflows (GH-AW)**.
+Workflows (GH-AW)**, y la construcción de un dataset relacional a partir del
+contenido de sus workflows.
 
 ## Problema que resuelve
 
 Dado un archivo CSV con una lista de repositorios candidatos, revisar
-manualmente uno por uno si cada repositorio usa GH-AW es lento y propenso a
-errores. Miner automatiza todo el proceso:
+manualmente uno por uno si cada repositorio usa GH-AW —y luego extraer y
+estructurar el contenido de sus workflows— es lento y propenso a errores.
+Miner automatiza todo el proceso en dos etapas (dos subcomandos):
 
+**`miner mine`** — identificación:
 1. Lee el CSV de repositorios candidatos.
 2. Para cada repositorio, consulta vía la API de GitHub el contenido de la
    carpeta `.github/workflows/`.
@@ -19,6 +22,18 @@ errores. Miner automatiza todo el proceso:
 4. Genera un nuevo CSV que contiene **únicamente** los repositorios que
    cumplen ese criterio.
 
+**`miner extract`** — construcción del dataset:
+5. Descarga el contenido de cada archivo `.md` de workflow encontrado
+   (reanudable: si se interrumpe, la siguiente corrida solo descarga lo
+   pendiente).
+6. Separa su frontmatter YAML del body Markdown, y aplana el frontmatter
+   (que varía de un workflow a otro: `on`, `permissions`, `tools`, `engine`,
+   etc.) en pares clave-valor, en vez de forzar columnas fijas que se
+   romperían con el primer workflow distinto.
+7. Genera un dataset relacional de **3 tablas** en formato Parquet
+   (`repositories`, `workflow_files`, `frontmatter_attributes`), listo para
+   análisis o publicación en Hugging Face Datasets.
+
 ## Estructura del proyecto
 
 ```
@@ -26,16 +41,29 @@ miner/
 ├── pyproject.toml        # dependencias y entry point de la CLI
 ├── .env.example          # variables de entorno necesarias (sin credenciales)
 ├── .gitignore
+├── docs/                       # diagrama ER, diccionario de datos, guías de uso
+│   ├── er-diagram.md
+│   ├── data-dictionary.md
+│   ├── cli-usage.md
+│   ├── huggingface-publish.md
+│   └── huggingface-dataset-card.md
 ├── src/
 │   └── miner/
-│       ├── cli.py             # interfaz de línea de comandos (Typer)
-│       ├── models.py          # modelos y validación de datos (Pydantic)
-│       ├── csv_io.py          # lectura/escritura de CSV (pandas)
-│       ├── github_client.py   # consultas a la API de GitHub (httpx)
-│       └── detector.py        # lógica de detección de GH-AW
+│       ├── cli.py                 # interfaz de línea de comandos (Typer): mine + extract
+│       ├── models.py              # modelos y validación de datos (Pydantic)
+│       ├── csv_io.py              # lectura/escritura de CSV (pandas)
+│       ├── token_pool.py          # rotación de tokens compartida (REST + GraphQL)
+│       ├── github_client.py       # consultas REST a la API de GitHub (httpx)
+│       ├── graphql_client.py      # consultas GraphQL en batch, con aislamiento de fallos
+│       ├── checkpoint.py          # progreso incremental reanudable (comando 'mine')
+│       ├── detector.py            # lógica de detección de GH-AW
+│       ├── frontmatter_parser.py  # separación de frontmatter YAML / body Markdown
+│       ├── extract_checkpoint.py  # progreso incremental reanudable (comando 'extract')
+│       ├── extraction.py          # descarga de .md desde GitHub (aislada por archivo)
+│       ├── dataset_builder.py     # construcción de las 3 tablas relacionales en memoria
+│       └── parquet_writer.py      # escritura de las tablas a archivos .parquet
 └── tests/
-    ├── test_detector.py       # pruebas de la lógica de detección
-    └── test_models.py         # pruebas de validación de identificadores
+    └── test_*.py              # pruebas de cada módulo de arriba
 ```
 
 ## Preparar el entorno Python
@@ -67,8 +95,8 @@ pip install -e ".[dev]"
 ```
 
 Esto instala Miner en modo editable junto con sus dependencias
-(`typer`, `pydantic`, `pandas`, `httpx`, `python-dotenv`) y las de desarrollo
-(`pytest`).
+(`typer`, `pydantic`, `pandas`, `httpx`, `python-dotenv`, `python-frontmatter`,
+`pyyaml`, `pyarrow`) y las de desarrollo (`pytest`).
 
 ## Configurar el token de GitHub
 
@@ -106,10 +134,15 @@ los tokens disponibles y salta los que se van agotando.
 
 ## Ejecutar Miner
 
+Miner tiene dos subcomandos: `mine` (identificar repos que usan GH-AW —
+Tarea 2) y `extract` (construir el dataset relacional a partir de esos
+repos — Tarea 3, ver la sección "Construir el dataset de workflows" más
+abajo). Esta sección cubre `mine`.
+
 Una vez instalado el entorno y configurado `.env`:
 
 ```bash
-miner repositorios.csv --output repositorios_ghaw.csv
+miner mine repositorios.csv --output repositorios_ghaw.csv
 ```
 
 - **Entrada** (`repositorios.csv`): un CSV con una columna que identifique el
@@ -118,7 +151,7 @@ miner repositorios.csv --output repositorios_ghaw.csv
   distinto, indícala con `--column`:
 
   ```bash
-  miner repositorios.csv --output repositorios_ghaw.csv --column mi_columna
+  miner mine repositorios.csv --output repositorios_ghaw.csv --column mi_columna
   ```
 
   Los valores de esa columna pueden venir como `owner/repo`,
@@ -148,7 +181,7 @@ Miner soporta dos formas de consultar GitHub, elegibles con `--api`:
   token), no la cantidad de repos por solicitud.
 
 ```bash
-miner repositorios_500k.csv --output repositorios_ghaw.csv --api graphql --batch-size 50
+miner mine repositorios_500k.csv --output repositorios_ghaw.csv --api graphql --batch-size 50
 ```
 
 ### Aislamiento de fallos en modo GraphQL
@@ -183,7 +216,7 @@ los tokens configurados, y guarda progreso incremental para poder reanudar
 si el proceso se corta.
 
 ```bash
-miner repositorios_500k.csv --output repositorios_ghaw.csv --concurrency-per-token 6
+miner mine repositorios_500k.csv --output repositorios_ghaw.csv --concurrency-per-token 6
 ```
 
 - **`--concurrency-per-token`** (por defecto `4`): solicitudes simultáneas por
@@ -205,6 +238,49 @@ miner repositorios_500k.csv --output repositorios_ghaw.csv --concurrency-per-tok
   mismo nombre de salida).
 - **`--checkpoint ruta.jsonl`**: para elegir explícitamente dónde guardar el
   progreso, en vez de derivarlo automáticamente del nombre de `--output`.
+
+## Construir el dataset de workflows (`extract`)
+
+Además de identificar *qué* repositorios usan GH-AW, Miner descarga sus
+archivos `.md` de workflow, separa el frontmatter YAML del body Markdown, y
+genera un **dataset relacional en formato Parquet**.
+
+```bash
+miner extract repositorios_ghaw.csv --output-dir dataset
+```
+
+- **Entrada**: el CSV de salida de `miner mine` (repos ya confirmados con
+  GH-AW). Igual que en `mine`, la columna de repositorio se autodetecta o
+  se indica con `--column`.
+- **Salida** (`--output-dir`, por defecto `dataset/`): 3 archivos Parquet
+  relacionados entre sí:
+
+  | Tabla | Grano | Contenido |
+  |---|---|---|
+  | `repositories.parquet` | 1 fila por repo | `repo_id` (PK), `owner`, `name`, `full_name` |
+  | `workflow_files.parquet` | 1 fila por archivo `.md` | `file_id` (PK), `repo_id` (FK), nombre/ruta del archivo, `has_lock`, el frontmatter completo como JSON (`raw_frontmatter`), y el body en Markdown (`body_markdown`) |
+  | `frontmatter_attributes.parquet` | 1 fila por atributo del frontmatter | `attribute_id` (PK), `file_id` (FK), `key_path` (ej. `permissions.contents`, `on.schedule[0]`), `value`, `value_type` |
+
+  El frontmatter se aplana como pares clave-valor (`frontmatter_attributes`)
+  en vez de columnas fijas, porque varía bastante entre workflows distintos
+  (`on`, `permissions`, `tools`, `engine`, etc., algunos anidados) — un
+  esquema de columnas rígidas se rompería con el primer workflow atípico.
+
+- **Reanudable**: igual que `mine`, cada archivo `.md` descargado se
+  registra en un checkpoint (`<output-dir>/extract.checkpoint.jsonl` por
+  defecto, o `--checkpoint ruta.jsonl`) apenas se resuelve. Si el proceso se
+  corta, vuelve a correr el mismo comando y solo se reintenta lo pendiente.
+  `--fresh` fuerza a ignorar el checkpoint y descargar todo de nuevo.
+- **Aislamiento de fallos por archivo**: si un `.md` puntual falla al
+  descargarse, se registra su error y se sigue con el resto del repositorio
+  y con los demás repositorios — un archivo problemático nunca frena la
+  extracción completa.
+- **`--concurrency-per-token`** (por defecto `4`): repositorios procesados
+  simultáneamente por cada token cargado en `GITHUB_TOKENS`.
+
+La documentación completa (diagrama entidad-relación, diccionario de datos
+columna por columna, y guía de publicación en Hugging Face) se agrega en
+`docs/` en una etapa posterior del proyecto.
 
 ## Ejecutar las pruebas
 
