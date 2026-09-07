@@ -93,7 +93,15 @@ class GitHubClient:
                 return [item.get("name", "") for item in items if item.get("type") == "file"]
 
             if response.status_code == 404:
-                return []
+                # Un 404 en /contents/.github/workflows es ambiguo: puede ser
+                # que la carpeta no exista (repo accesible, confirmado que NO
+                # usa GH-AW -> []) o que el repo entero no sea accesible
+                # (borrado, privado, sin permiso -> no se puede confirmar nada,
+                # queda pendiente -> None). Se desambigua consultando el repo.
+                repo_ok = self._repo_exists(owner, name)
+                if repo_ok is True:
+                    return []
+                return None
 
             if response.status_code in (403, 429):
                 if slot.remaining > 2:
@@ -102,6 +110,45 @@ class GitHubClient:
                 continue
 
             return None  # error real (401, 5xx, etc.), no confundir con "no usa"
+
+        return None
+
+    def _repo_exists(self, owner: str, name: str) -> Optional[bool]:
+        """
+        Consulta /repos/{owner}/{name} para saber si el repositorio es
+        accesible con los tokens configurados.
+
+        Retorna:
+          True   el repo existe y es accesible.
+          False  el repo no existe / no es accesible (404).
+          None   no se pudo determinar (rate limit, error de red o 5xx):
+                 el llamador debe tratarlo como pendiente, no como "no existe".
+        """
+        url = f"/repos/{owner}/{name}"
+
+        for attempt in range(MAX_RETRIES):
+            slot = self._pool.next_slot()
+            try:
+                response = slot.client.get(url)
+            except httpx.HTTPError:
+                time.sleep(min(2 ** attempt, 30))
+                continue
+
+            slot.update_from_headers(response.headers)
+
+            if response.status_code == 200:
+                return True
+
+            if response.status_code == 404:
+                return False
+
+            if response.status_code in (403, 429):
+                if slot.remaining > 2:
+                    retry_after = response.headers.get("Retry-After")
+                    time.sleep(int(retry_after) + 2 if retry_after else 10)
+                continue
+
+            return None
 
         return None
 

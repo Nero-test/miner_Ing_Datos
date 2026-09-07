@@ -51,6 +51,14 @@ decimos que no sabemos, y queda registrado para reintentar en la
 siguiente corrida. Aplica también a `extraction.py` (una fila
 `__listing__` sintética si no se puede listar `.github/workflows/`).
 
+En `github_client.list_workflow_files`, un 404 al pedir
+`/contents/.github/workflows` es ambiguo (carpeta ausente vs. repo
+borrado/privado/sin permiso). Se desambigua con una segunda consulta a
+`/repos/{owner}/{name}` (`_repo_exists`): solo se devuelve `[]`
+("confirmado sin GH-AW") si el repo responde 200; si el repo también da
+404 o queda indeterminado, se devuelve `None`. El camino GraphQL ya
+distinguía este caso de forma nativa (`r{n}: null` → pendiente).
+
 ### 2. Aislamiento de fallos al grano más chico posible
 
 - **GraphQL (`graphql_client.py`, `_retry_or_split`)**: si un lote de ~50
