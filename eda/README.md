@@ -55,10 +55,12 @@ python -m pip install jupyterlab ipykernel pandas pyarrow matplotlib seaborn
 ```
 
 Estas dependencias también quedaron registradas como grupo opcional `eda`
-en `pyproject.toml`, así que alternativamente:
+en `pyproject.toml` (y en `uv.lock`), así que alternativamente:
 
 ```bash
 python -m pip install -e ".[eda]"
+# o, con uv:
+uv sync --extra eda
 ```
 
 ## 3. Registrar el kernel del entorno virtual
