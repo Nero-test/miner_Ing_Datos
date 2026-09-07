@@ -19,6 +19,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# Dependencias solo para los notebooks de eda/ (no son necesarias para la CLI).
+eda = [
+    "jupyterlab>=4.0",
+    "ipykernel>=6.0",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+]
 
 [project.scripts]
 miner = "miner.cli:app"

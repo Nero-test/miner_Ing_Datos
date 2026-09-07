@@ -19,7 +19,6 @@ from __future__ import annotations
 import itertools
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -127,6 +126,10 @@ class DatasetBuilder:
         }
 
 
+# La escritura a .parquet vive en parquet_writer.write_parquet_tables (que además
+# valida que estén las 3 tablas del esquema). Este módulo solo arma las tablas.
+
+
 def build_dataset_from_checkpoint(checkpoint_records: Dict[str, dict]) -> DatasetBuilder:
     """
     Construye un DatasetBuilder a partir de los registros con status "ok" de
@@ -152,21 +155,3 @@ def build_dataset_from_checkpoint(checkpoint_records: Dict[str, dict]) -> Datase
             fetched_at=record.get("fetched_at"),
         )
     return builder
-
-
-def write_parquet(dataframes: Dict[str, pd.DataFrame], output_dir: Path) -> Dict[str, Path]:
-    """
-    Escribe cada tabla como un archivo .parquet independiente en output_dir
-    (una tabla = un archivo, ej. repositories.parquet). Usa PyArrow como
-    motor porque es explícito en el enunciado y evita ambigüedad de tipos
-    frente al motor fastparquet.
-
-    Devuelve {nombre_tabla: ruta_del_archivo_escrito}.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    written: Dict[str, Path] = {}
-    for table_name, df in dataframes.items():
-        path = output_dir / f"{table_name}.parquet"
-        df.to_parquet(path, engine="pyarrow", index=False)
-        written[table_name] = path
-    return written

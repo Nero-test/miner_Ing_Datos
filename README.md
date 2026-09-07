@@ -278,9 +278,12 @@ miner extract repositorios_ghaw.csv --output-dir dataset
 - **`--concurrency-per-token`** (por defecto `4`): repositorios procesados
   simultáneamente por cada token cargado en `GITHUB_TOKENS`.
 
-La documentación completa (diagrama entidad-relación, diccionario de datos
-columna por columna, y guía de publicación en Hugging Face) se agrega en
-`docs/` en una etapa posterior del proyecto.
+La documentación completa está en `docs/`: diagrama entidad-relación
+([`er-diagram.md`](docs/er-diagram.md)), diccionario de datos columna por
+columna ([`data-dictionary.md`](docs/data-dictionary.md)), guía de la CLI
+([`cli-usage.md`](docs/cli-usage.md)) y guías de publicación en Hugging
+Face ([`huggingface-publish.md`](docs/huggingface-publish.md),
+[`huggingface-dataset-card.md`](docs/huggingface-dataset-card.md)).
 
 ## Ejecutar las pruebas
 

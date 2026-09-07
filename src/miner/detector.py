@@ -12,7 +12,7 @@ de archivo, lo que la hace trivial de probar con pytest.
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 
 def _split_base_and_kind(filename: str) -> tuple[str, str] | None:
@@ -31,60 +31,18 @@ def _split_base_and_kind(filename: str) -> tuple[str, str] | None:
     return None
 
 
-def uses_gh_aw(filenames: Iterable[str]) -> bool:
+def _classify_bases(filenames: Iterable[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
-    Determina si el conjunto de nombres de archivo dado corresponde a un
-    repositorio que usa GH-AW: es decir, si existe al menos un nombre base
-    que tenga tanto un archivo .md como su .lock.yml/.lock.yaml correspondiente.
-    """
-    md_bases: Set[str] = set()
-    lock_bases: Set[str] = set()
+    Recorre los nombres de archivo una sola vez y devuelve
+    (md_by_base, lock_by_base): para cada nombre base normalizado (en
+    minúsculas), el nombre de archivo ORIGINAL de su .md y de su
+    .lock.yml/.lock.yaml. Si hay varios archivos con el mismo nombre base
+    (ej. distinta capitalización), se conserva el primero en el orden en
+    que aparece `filenames`.
 
-    for name in filenames:
-        classified = _split_base_and_kind(name)
-        if classified is None:
-            continue
-        base, kind = classified
-        if kind == "md":
-            md_bases.add(base)
-        else:
-            lock_bases.add(base)
-
-    return bool(md_bases & lock_bases)
-
-
-def matching_pairs(filenames: Iterable[str]) -> List[str]:
-    """
-    Devuelve los nombres base (en minúsculas) que tienen tanto .md como
-    .lock.yml/.lock.yaml. Útil para depuración/logging, no solo un booleano.
-    """
-    md_bases: Set[str] = set()
-    lock_bases: Set[str] = set()
-
-    for name in filenames:
-        classified = _split_base_and_kind(name)
-        if classified is None:
-            continue
-        base, kind = classified
-        if kind == "md":
-            md_bases.add(base)
-        else:
-            lock_bases.add(base)
-
-    return sorted(md_bases & lock_bases)
-
-
-def matching_file_pairs(filenames: Iterable[str]) -> List[Tuple[str, str]]:
-    """
-    Como matching_pairs, pero devuelve pares (nombre_md, nombre_lock) con
-    los nombres de archivo ORIGINALES (preservando mayúsculas/minúsculas),
-    ordenados por nombre base para un resultado determinista. Necesario
-    para saber exactamente qué archivo .md descargar de GitHub (las rutas
-    son sensibles a mayúsculas).
-
-    Si hay más de un archivo con el mismo nombre base normalizado (ej.
-    distinta capitalización), se conserva el primero encontrado de cada
-    tipo, en el orden en que aparece `filenames`.
+    Es la pieza compartida por uses_gh_aw / matching_pairs /
+    matching_file_pairs: la lógica de emparejar .md con .lock vive en un
+    solo lugar.
     """
     md_by_base: Dict[str, str] = {}
     lock_by_base: Dict[str, str] = {}
@@ -99,4 +57,35 @@ def matching_file_pairs(filenames: Iterable[str]) -> List[Tuple[str, str]]:
         else:
             lock_by_base.setdefault(base, name)
 
+    return md_by_base, lock_by_base
+
+
+def uses_gh_aw(filenames: Iterable[str]) -> bool:
+    """
+    Determina si el conjunto de nombres de archivo dado corresponde a un
+    repositorio que usa GH-AW: es decir, si existe al menos un nombre base
+    que tenga tanto un archivo .md como su .lock.yml/.lock.yaml correspondiente.
+    """
+    md_by_base, lock_by_base = _classify_bases(filenames)
+    return bool(md_by_base.keys() & lock_by_base.keys())
+
+
+def matching_pairs(filenames: Iterable[str]) -> List[str]:
+    """
+    Devuelve los nombres base (en minúsculas) que tienen tanto .md como
+    .lock.yml/.lock.yaml. Útil para depuración/logging, no solo un booleano.
+    """
+    md_by_base, lock_by_base = _classify_bases(filenames)
+    return sorted(md_by_base.keys() & lock_by_base.keys())
+
+
+def matching_file_pairs(filenames: Iterable[str]) -> List[Tuple[str, str]]:
+    """
+    Como matching_pairs, pero devuelve pares (nombre_md, nombre_lock) con
+    los nombres de archivo ORIGINALES (preservando mayúsculas/minúsculas),
+    ordenados por nombre base para un resultado determinista. Necesario
+    para saber exactamente qué archivo .md descargar de GitHub (las rutas
+    son sensibles a mayúsculas).
+    """
+    md_by_base, lock_by_base = _classify_bases(filenames)
     return [(md_by_base[base], lock_by_base[base]) for base in sorted(md_by_base.keys() & lock_by_base.keys())]

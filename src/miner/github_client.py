@@ -8,7 +8,7 @@ N la cantidad de repositorios que se pueden consultar por hora sin esperar.
 Responsabilidad única: dado un owner/name, obtener la lista de nombres de
 archivo dentro de .github/workflows, o el contenido de un archivo puntual.
 No sabe nada de CSV ni de la lógica de detección de GH-AW (eso vive en
-detector.py) ni de parseo de frontmatter (eso vive en markdown_extractor.py).
+detector.py) ni de parseo de frontmatter (eso vive en frontmatter_parser.py).
 """
 from __future__ import annotations
 
