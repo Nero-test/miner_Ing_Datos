@@ -3,14 +3,16 @@
 Miner es una aplicación de línea de comandos (CLI) en Python que automatiza la
 identificación de repositorios de GitHub que utilizan **GitHub Agentic
 Workflows (GH-AW)**, y la construcción de un dataset relacional a partir del
-contenido de sus workflows.
+contenido de sus workflows. El repositorio incluye además un análisis
+exploratorio (EDA) de ese dataset en [`eda/`](eda/).
 
 ## Problema que resuelve
 
 Dado un archivo CSV con una lista de repositorios candidatos, revisar
 manualmente uno por uno si cada repositorio usa GH-AW —y luego extraer y
 estructurar el contenido de sus workflows— es lento y propenso a errores.
-Miner automatiza todo el proceso en dos etapas (dos subcomandos):
+Miner automatiza todo el proceso en dos subcomandos, y el repositorio suma
+un análisis exploratorio del dataset resultante:
 
 **`miner mine`** — identificación:
 1. Lee el CSV de repositorios candidatos.
@@ -34,11 +36,17 @@ Miner automatiza todo el proceso en dos etapas (dos subcomandos):
    (`repositories`, `workflow_files`, `frontmatter_attributes`), listo para
    análisis o publicación en Hugging Face Datasets.
 
+**`eda/`** — análisis exploratorio:
+8. Dos notebooks Jupyter caracterizan el dataset resultante: describen las
+   tablas y sus relaciones, revisan su calidad y exploran patrones del
+   frontmatter y el body (ver [`eda/README.md`](eda/README.md)).
+
 ## Estructura del proyecto
 
 ```
 miner/
 ├── pyproject.toml        # dependencias y entry point de la CLI
+├── uv.lock               # lockfile de dependencias (uv)
 ├── .env.example          # variables de entorno necesarias (sin credenciales)
 ├── .gitignore
 ├── docs/                       # diagrama ER, diccionario de datos, guías de uso
@@ -47,6 +55,10 @@ miner/
 │   ├── cli-usage.md
 │   ├── huggingface-publish.md
 │   └── huggingface-dataset-card.md
+├── eda/                        # análisis exploratorio del dataset (Tarea 4)
+│   ├── 01_descripcion_y_calidad.ipynb
+│   ├── 02_exploracion_y_hallazgos.ipynb
+│   └── README.md
 ├── src/
 │   └── miner/
 │       ├── cli.py                 # interfaz de línea de comandos (Typer): mine + extract
@@ -97,6 +109,17 @@ pip install -e ".[dev]"
 Esto instala Miner en modo editable junto con sus dependencias
 (`typer`, `pydantic`, `pandas`, `httpx`, `python-dotenv`, `python-frontmatter`,
 `pyyaml`, `pyarrow`) y las de desarrollo (`pytest`).
+
+Los notebooks de análisis exploratorio (`eda/`) necesitan además
+`jupyterlab`, `ipykernel`, `matplotlib` y `seaborn`, agrupados en el extra
+opcional `eda` (instálalo solo si vas a ejecutar los notebooks):
+
+```bash
+uv pip install -e ".[eda]"     # o, sin uv:  pip install -e ".[eda]"
+```
+
+Los pasos para registrar el kernel del entorno virtual y ejecutar los
+notebooks en orden están en [`eda/README.md`](eda/README.md).
 
 ## Configurar el token de GitHub
 
@@ -284,6 +307,27 @@ columna ([`data-dictionary.md`](docs/data-dictionary.md)), guía de la CLI
 ([`cli-usage.md`](docs/cli-usage.md)) y guías de publicación en Hugging
 Face ([`huggingface-publish.md`](docs/huggingface-publish.md),
 [`huggingface-dataset-card.md`](docs/huggingface-dataset-card.md)).
+
+## Análisis exploratorio del dataset (`eda/`)
+
+El directorio [`eda/`](eda/) contiene un análisis exploratorio (EDA) del
+dataset generado por `miner extract`, desarrollado en dos notebooks Jupyter:
+
+| Notebook | Contenido |
+|---|---|
+| [`01_descripcion_y_calidad.ipynb`](eda/01_descripcion_y_calidad.ipynb) | Origen y carga de los datos, descripción de las 3 tablas y sus relaciones (claves primarias y foráneas), revisión de calidad (valores ausentes, duplicados, claves huérfanas, consistencia de tipos) y tratamiento de los problemas encontrados. Deja tablas preparadas en `eda/data/processed/`. |
+| [`02_exploracion_y_hallazgos.ipynb`](eda/02_exploracion_y_hallazgos.ipynb) | Distribución de archivos por repositorio, exploración del frontmatter (cobertura de campos, `engine`, `permissions.contents`, triggers) y del body, dos preguntas exploratorias que cruzan varias tablas, y hallazgos con sus limitaciones. |
+
+Ambos notebooks se ejecutan de principio a fin sin errores y conservan sus
+salidas para poder revisarlos directamente en GitHub. Las instrucciones
+completas (cómo obtener las tablas, instalar dependencias, registrar el
+kernel del entorno virtual y el orden de ejecución) están en
+[`eda/README.md`](eda/README.md).
+
+**Dataset propio publicado en Hugging Face:**
+[EstebanCQ/gh-aw-workflows-dataset](https://huggingface.co/datasets/EstebanCQ/gh-aw-workflows-dataset)
+— 345 repositorios, 1.409 archivos de workflow y 58.573 atributos de
+frontmatter (instantánea del 2026-09-05).
 
 ## Ejecutar las pruebas
 
