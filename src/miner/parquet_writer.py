@@ -12,7 +12,7 @@ from typing import Dict
 
 import pandas as pd
 
-REQUIRED_TABLES = ("repositories", "workflow_files", "frontmatter_attributes")
+REQUIRED_TABLES = ("repositories", "workflow_files", "workflow_locks", "frontmatter_attributes")
 
 
 def write_parquet_tables(tables: Dict[str, pd.DataFrame], output_dir: Path) -> Dict[str, Path]:
@@ -20,13 +20,14 @@ def write_parquet_tables(tables: Dict[str, pd.DataFrame], output_dir: Path) -> D
     Escribe cada tabla como <output_dir>/<nombre_tabla>.parquet.
 
     Lanza ValueError si falta alguna de las tablas requeridas por el
-    esquema (repositories, workflow_files, frontmatter_attributes), para
-    detectar temprano un DatasetBuilder mal construido en vez de generar
-    en silencio un dataset incompleto que solo se nota al publicarlo.
+    esquema (repositories, workflow_files, workflow_locks,
+    frontmatter_attributes), para detectar temprano un DatasetBuilder mal
+    construido en vez de generar en silencio un dataset incompleto que
+    solo se nota al publicarlo.
 
     Devuelve {nombre_tabla: ruta_escrita} para las tablas efectivamente
     escritas (incluye cualquier tabla extra que venga en `tables` además
-    de las 3 requeridas).
+    de las requeridas).
     """
     missing = [t for t in REQUIRED_TABLES if t not in tables]
     if missing:

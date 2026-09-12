@@ -16,26 +16,27 @@ size_categories:
 
 Dataset relacional con repositorios de GitHub que usan
 [GitHub Agentic Workflows (GH-AW)](https://github.github.com/gh-aw/), y el
-contenido estructurado (frontmatter YAML + body Markdown) de sus archivos de
-workflow.
+contenido estructurado de sus archivos de workflow: el `.md` fuente
+(frontmatter YAML + body Markdown) y su `.lock.yml`/`.lock.yaml` compilado.
 
 Generado con [Miner](https://github.com/<tu-usuario>/miner), una CLI en
-Python que identifica repositorios que usan GH-AW y extrae sus workflows
-`.md` en un formato analítico.
+Python que identifica repositorios que usan GH-AW y extrae sus pares
+`.md` + `.lock` en un formato analítico.
 
 - **Repositorios incluidos:** `<completar>`
-- **Archivos de workflow incluidos:** `<completar>`
+- **Archivos de workflow incluidos:** `<completar>` (cada uno con su `.lock` correspondiente)
 - **Fecha de generación:** `<completar, ej. 2026-09-05>`
 
 ## Estructura del dataset
 
-El dataset está compuesto por 3 tablas Parquet relacionadas:
+El dataset está compuesto por 4 tablas Parquet relacionadas:
 
 | Tabla | Filas ≈ | Descripción |
 |---|---|---|
 | `repositories.parquet` | 1 por repo | Repositorios de GitHub que usan GH-AW. |
-| `workflow_files.parquet` | 1 por archivo `.md` | Frontmatter completo (como JSON) + body Markdown de cada workflow. |
-| `frontmatter_attributes.parquet` | N por archivo | Atributos del frontmatter aplanados como pares clave-valor (ej. `permissions.contents`, `on.schedule[0].cron`) — el frontmatter de GH-AW varía entre workflows, así que no se fuerzan columnas fijas. |
+| `workflow_files.parquet` | 1 por archivo `.md` | Frontmatter completo (como JSON) + body Markdown de cada workflow fuente. |
+| `workflow_locks.parquet` | 1 por archivo `.md` (relación 1:1) | El `.lock.yml`/`.lock.yaml` compilado correspondiente, como texto plano (`raw_content`). |
+| `frontmatter_attributes.parquet` | N por archivo `.md` | Atributos del frontmatter aplanados como pares clave-valor (ej. `permissions.contents`, `on.schedule[0].cron`) — el frontmatter de GH-AW varía entre workflows, así que no se fuerzan columnas fijas. |
 
 Esquema entidad-relación completo y diccionario de datos (tipos, PKs, FKs)
 disponibles en el repositorio de Miner: `docs/er-diagram.md` y
@@ -65,9 +66,12 @@ files = pd.read_parquet(path)
 1. Se identificaron repositorios candidatos y se filtraron los que usan
    GH-AW (al menos un par `<nombre>.md` + `<nombre>.lock.yml` en
    `.github/workflows/`).
-2. Para cada repositorio identificado, se descargó cada archivo `.md` de
-   workflow y se separó su frontmatter YAML del body Markdown.
-3. El frontmatter se aplanó en pares clave-valor (tabla
+2. Para cada repositorio identificado, se descargó cada par `.md` +
+   `.lock` de workflow; el `.md` se separó en frontmatter YAML y body
+   Markdown, el `.lock` se conservó como texto plano. Un par solo se
+   incluye si **ambos** archivos se descargaron con éxito, para garantizar
+   la relación 1:1 entre `workflow_files` y `workflow_locks`.
+3. El frontmatter del `.md` se aplanó en pares clave-valor (tabla
    `frontmatter_attributes`) y se conservó completo como JSON en
    `workflow_files.raw_frontmatter`, para no perder ningún campo.
 
@@ -77,9 +81,10 @@ files = pd.read_parquet(path)
   estándar al momento de la generación.
 - Es una instantánea (snapshot): los workflows pueden cambiar o eliminarse
   después de la fecha de generación indicada arriba.
-- `has_lock` es siempre `true` en este dataset: solo se incluyen archivos
-  `.md` que tienen su `.lock.yml`/`.lock.yaml` compilado confirmado (la
-  definición de "usa GH-AW" de este proyecto).
+- Todo archivo de `workflow_files` tiene exactamente un `.lock` en
+  `workflow_locks` (relación 1:1): solo se incluyen pares `.md` +
+  `.lock.yml`/`.lock.yaml` confirmados (la definición de "usa GH-AW" de
+  este proyecto), y ambos deben haberse descargado con éxito.
 
 ## Licencia
 

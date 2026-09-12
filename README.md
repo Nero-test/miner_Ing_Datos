@@ -25,16 +25,19 @@ un análisis exploratorio del dataset resultante:
    cumplen ese criterio.
 
 **`miner extract`** — construcción del dataset:
-5. Descarga el contenido de cada archivo `.md` de workflow encontrado
-   (reanudable: si se interrumpe, la siguiente corrida solo descarga lo
-   pendiente).
-6. Separa su frontmatter YAML del body Markdown, y aplana el frontmatter
-   (que varía de un workflow a otro: `on`, `permissions`, `tools`, `engine`,
-   etc.) en pares clave-valor, en vez de forzar columnas fijas que se
-   romperían con el primer workflow distinto.
-7. Genera un dataset relacional de **3 tablas** en formato Parquet
-   (`repositories`, `workflow_files`, `frontmatter_attributes`), listo para
-   análisis o publicación en Hugging Face Datasets.
+5. Descarga el contenido de AMBOS archivos de cada par `.md` + `.lock`
+   encontrado (reanudable: si se interrumpe, la siguiente corrida solo
+   descarga lo pendiente; un par solo se marca resuelto si los dos
+   archivos se descargaron con éxito).
+6. Separa el frontmatter YAML del body Markdown del `.md`, y aplana el
+   frontmatter (que varía de un workflow a otro: `on`, `permissions`,
+   `tools`, `engine`, etc.) en pares clave-valor, en vez de forzar columnas
+   fijas que se romperían con el primer workflow distinto. El `.lock` se
+   conserva tal cual, como texto plano.
+7. Genera un dataset relacional de **4 tablas** en formato Parquet
+   (`repositories`, `workflow_files`, `workflow_locks`,
+   `frontmatter_attributes`), listo para análisis o publicación en Hugging
+   Face Datasets.
 
 **`eda/`** — análisis exploratorio:
 8. Dos notebooks Jupyter caracterizan el dataset resultante: describen las
@@ -264,9 +267,9 @@ miner mine repositorios_500k.csv --output repositorios_ghaw.csv --concurrency-pe
 
 ## Construir el dataset de workflows (`extract`)
 
-Además de identificar *qué* repositorios usan GH-AW, Miner descarga sus
-archivos `.md` de workflow, separa el frontmatter YAML del body Markdown, y
-genera un **dataset relacional en formato Parquet**.
+Además de identificar *qué* repositorios usan GH-AW, Miner descarga cada par
+`.md` + `.lock` de workflow, separa el frontmatter YAML del body Markdown
+del `.md`, y genera un **dataset relacional en formato Parquet**.
 
 ```bash
 miner extract repositorios_ghaw.csv --output-dir dataset
@@ -275,29 +278,33 @@ miner extract repositorios_ghaw.csv --output-dir dataset
 - **Entrada**: el CSV de salida de `miner mine` (repos ya confirmados con
   GH-AW). Igual que en `mine`, la columna de repositorio se autodetecta o
   se indica con `--column`.
-- **Salida** (`--output-dir`, por defecto `dataset/`): 3 archivos Parquet
+- **Salida** (`--output-dir`, por defecto `dataset/`): 4 archivos Parquet
   relacionados entre sí:
 
   | Tabla | Grano | Contenido |
   |---|---|---|
   | `repositories.parquet` | 1 fila por repo | `repo_id` (PK), `owner`, `name`, `full_name` |
-  | `workflow_files.parquet` | 1 fila por archivo `.md` | `file_id` (PK), `repo_id` (FK), nombre/ruta del archivo, `has_lock`, el frontmatter completo como JSON (`raw_frontmatter`), y el body en Markdown (`body_markdown`) |
+  | `workflow_files.parquet` | 1 fila por archivo `.md` | `file_id` (PK), `repo_id` (FK), nombre/ruta del archivo, el frontmatter completo como JSON (`raw_frontmatter`), y el body en Markdown (`body_markdown`) |
+  | `workflow_locks.parquet` | 1 fila por archivo `.lock` (1:1 con `workflow_files`) | `lock_id` (PK), `file_id` (FK), nombre/ruta del archivo, y el YAML compilado como texto plano (`raw_content`) |
   | `frontmatter_attributes.parquet` | 1 fila por atributo del frontmatter | `attribute_id` (PK), `file_id` (FK), `key_path` (ej. `permissions.contents`, `on.schedule[0]`), `value`, `value_type` |
 
   El frontmatter se aplana como pares clave-valor (`frontmatter_attributes`)
   en vez de columnas fijas, porque varía bastante entre workflows distintos
   (`on`, `permissions`, `tools`, `engine`, etc., algunos anidados) — un
-  esquema de columnas rígidas se rompería con el primer workflow atípico.
+  esquema de columnas rígidas se rompería con el primer workflow atípico. El
+  `.lock`, en cambio, es contenido compilado sin esa variabilidad, así que
+  se guarda como texto plano en su propia tabla en vez de aplanarse.
 
-- **Reanudable**: igual que `mine`, cada archivo `.md` descargado se
+- **Reanudable**: igual que `mine`, cada par `.md` + `.lock` descargado se
   registra en un checkpoint (`<output-dir>/extract.checkpoint.jsonl` por
   defecto, o `--checkpoint ruta.jsonl`) apenas se resuelve. Si el proceso se
   corta, vuelve a correr el mismo comando y solo se reintenta lo pendiente.
   `--fresh` fuerza a ignorar el checkpoint y descargar todo de nuevo.
-- **Aislamiento de fallos por archivo**: si un `.md` puntual falla al
-  descargarse, se registra su error y se sigue con el resto del repositorio
-  y con los demás repositorios — un archivo problemático nunca frena la
-  extracción completa.
+- **Aislamiento de fallos por par**: si el `.md` o el `.lock` de un par
+  fallan al descargarse, se registra el error de ese par y se sigue con el
+  resto del repositorio y con los demás repositorios — un par problemático
+  nunca frena la extracción completa, y nunca se guarda un `.md` sin su
+  `.lock` correspondiente (mantiene la relación 1:1 del esquema).
 - **`--concurrency-per-token`** (por defecto `4`): repositorios procesados
   simultáneamente por cada token cargado en `GITHUB_TOKENS`.
 
@@ -315,7 +322,7 @@ dataset generado por `miner extract`, desarrollado en dos notebooks Jupyter:
 
 | Notebook | Contenido |
 |---|---|
-| [`01_descripcion_y_calidad.ipynb`](eda/01_descripcion_y_calidad.ipynb) | Origen y carga de los datos, descripción de las 3 tablas y sus relaciones (claves primarias y foráneas), revisión de calidad (valores ausentes, duplicados, claves huérfanas, consistencia de tipos) y tratamiento de los problemas encontrados. Deja tablas preparadas en `eda/data/processed/`. |
+| [`01_descripcion_y_calidad.ipynb`](eda/01_descripcion_y_calidad.ipynb) | Origen y carga de los datos, descripción de las 4 tablas y sus relaciones (claves primarias y foráneas, incluida la 1:1 entre `workflow_files` y `workflow_locks`), revisión de calidad (valores ausentes, duplicados, claves huérfanas, consistencia de tipos) y tratamiento de los problemas encontrados. Deja tablas preparadas en `eda/data/processed/`. |
 | [`02_exploracion_y_hallazgos.ipynb`](eda/02_exploracion_y_hallazgos.ipynb) | Distribución de archivos por repositorio, exploración del frontmatter (cobertura de campos, `engine`, `permissions.contents`, triggers) y del body, dos preguntas exploratorias que cruzan varias tablas, y hallazgos con sus limitaciones. |
 
 Ambos notebooks se ejecutan de principio a fin sin errores y conservan sus
@@ -326,8 +333,9 @@ kernel del entorno virtual y el orden de ejecución) están en
 
 **Dataset propio publicado en Hugging Face:**
 [EstebanCQ/gh-aw-workflows-dataset](https://huggingface.co/datasets/EstebanCQ/gh-aw-workflows-dataset)
-— 345 repositorios, 1.409 archivos de workflow y 58.573 atributos de
-frontmatter (instantánea del 2026-09-05).
+— 338 repositorios, 1.390 archivos de workflow (cada uno con su `.lock`
+correspondiente) y 58.281 atributos de frontmatter (instantánea del
+2026-09-12).
 
 ## Ejecutar las pruebas
 

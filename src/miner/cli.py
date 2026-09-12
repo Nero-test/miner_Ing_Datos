@@ -5,8 +5,9 @@ CLI de Miner: dos subcomandos.
       Identifica qué repositorios usan GH-AW (Tarea 2).
 
   miner extract repositorios_ghaw.csv --output-dir dataset/
-      Descarga los archivos .md de GH-AW de esos repos, separa frontmatter
-      de body, y genera un dataset relacional en Parquet (Tarea 3).
+      Descarga los pares .md + .lock de GH-AW de esos repos, separa
+      frontmatter de body del .md, y genera un dataset relacional en
+      Parquet (Tarea 3).
 
 Ambos comandos usan varios tokens en paralelo. 'mine' soporta dos formas de
 consultar GitHub (--api rest/graphql) y guarda progreso incremental
@@ -369,10 +370,10 @@ def extract(
     ),
 ) -> None:
     """
-    Descarga los archivos .md de GH-AW de cada repositorio de INPUT_CSV,
-    separa frontmatter/body, y genera el dataset relacional (repositories,
-    workflow_files, frontmatter_attributes) como archivos .parquet en
-    --output-dir.
+    Descarga los pares .md + .lock de GH-AW de cada repositorio de
+    INPUT_CSV, separa frontmatter/body del .md, y genera el dataset
+    relacional (repositories, workflow_files, workflow_locks,
+    frontmatter_attributes) como archivos .parquet en --output-dir.
     """
     load_dotenv()
     tokens = _load_tokens()

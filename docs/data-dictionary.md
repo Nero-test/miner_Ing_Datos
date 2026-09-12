@@ -36,8 +36,9 @@ archivo de workflow.
 ## Tabla: `workflow_files`
 
 Un registro por archivo `.md` de GH-AW encontrado (que tiene su
-`.lock.yml`/`.lock.yaml` correspondiente — ver `detector.matching_file_pairs`),
-con su frontmatter y body ya separados.
+`.lock.yml`/`.lock.yaml` correspondiente — ver `detector.matching_file_pairs`
+— y que se descargó con éxito junto con él), con su frontmatter y body ya
+separados.
 
 | Columna | Tipo | Descripción | Clave |
 |---|---|---|---|
@@ -45,9 +46,25 @@ con su frontmatter y body ya separados.
 | `repo_id` | int | Repositorio al que pertenece este archivo. | FK → `repositories.repo_id` |
 | `file_name` | string | Nombre del archivo `.md` (ej. `daily-report.md`), preservando mayúsculas/minúsculas originales. | |
 | `file_path` | string | Ruta completa dentro del repo (`.github/workflows/<file_name>`). | |
-| `has_lock` | bool | Siempre `true` en este dataset: Miner solo extrae archivos `.md` que tienen su `.lock.yml`/`.lock.yaml` confirmado (la definición de "usa GH-AW" de la Tarea 2). Se conserva la columna para que el esquema sea explícito sobre esta condición. | |
 | `raw_frontmatter` | string (JSON) | El frontmatter **completo** del archivo, serializado como JSON, para no perder ningún campo aunque no esté descompuesto en `frontmatter_attributes` (por ejemplo, valores `null` o tipos no triviales). | |
 | `body_markdown` | string | El body Markdown del archivo (las instrucciones en lenguaje natural para el agente de IA), sin el frontmatter. | |
+| `fetched_at` | string (ISO 8601, UTC) | Marca de tiempo de cuándo Miner descargó este archivo (y su `.lock` correspondiente). | |
+
+## Tabla: `workflow_locks`
+
+Un registro por archivo `.lock.yml`/`.lock.yaml` — el workflow de GitHub
+Actions **compilado** a partir del `.md` correspondiente. Relación 1:1 con
+`workflow_files`: todo archivo `.md` del dataset tiene exactamente un
+`.lock` (ver ["Por qué `workflow_locks` es una tabla aparte"](er-diagram.md)
+en el diagrama ER).
+
+| Columna | Tipo | Descripción | Clave |
+|---|---|---|---|
+| `lock_id` | int | Identificador surrogado del `.lock`. | PK |
+| `file_id` | int | Archivo `.md` del que este `.lock` es la versión compilada. | FK → `workflow_files.file_id` (1:1) |
+| `file_name` | string | Nombre del archivo `.lock.yml`/`.lock.yaml`, preservando mayúsculas/minúsculas originales. | |
+| `file_path` | string | Ruta completa dentro del repo (`.github/workflows/<file_name>`). | |
+| `raw_content` | string | El YAML compilado completo, como texto plano (no aplanado — es contenido generado, no un frontmatter con esquema variable). | |
 | `fetched_at` | string (ISO 8601, UTC) | Marca de tiempo de cuándo Miner descargó este archivo. | |
 
 ## Tabla: `frontmatter_attributes`
@@ -80,10 +97,22 @@ contents_write = attrs[(attrs["key_path"] == "permissions.contents") & (attrs["v
 files[files["file_id"].isin(contents_write["file_id"])][["file_name", "file_path"]]
 ```
 
+Como `workflow_locks` es 1:1 con `workflow_files`, cruzarlas es un join
+directo por `file_id`:
+
+```python
+locks = pd.read_parquet("dataset/workflow_locks.parquet")
+
+# .md fuente junto con su .lock compilado
+files.merge(locks, on="file_id", suffixes=("_md", "_lock"))[
+    ["file_name_md", "file_name_lock", "body_markdown", "raw_content"]
+]
+```
+
 ## Formato de archivo
 
 Todas las tablas se escriben como archivos `.parquet` independientes
-(`repositories.parquet`, `workflow_files.parquet`,
+(`repositories.parquet`, `workflow_files.parquet`, `workflow_locks.parquet`,
 `frontmatter_attributes.parquet`), usando PyArrow como motor. Se pueden leer
 con `pandas.read_parquet(...)` o cualquier herramienta compatible con
 Apache Parquet (DuckDB, Polars, Spark, etc.).

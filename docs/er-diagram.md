@@ -1,6 +1,6 @@
 # Diagrama entidad-relación
 
-El dataset generado por `miner extract` está compuesto por **3 tablas**
+El dataset generado por `miner extract` está compuesto por **4 tablas**
 relacionadas. GitHub renderiza automáticamente el diagrama Mermaid de abajo
 al ver este archivo en el repositorio.
 
@@ -8,6 +8,7 @@ al ver este archivo en el repositorio.
 erDiagram
     REPOSITORIES ||--o{ WORKFLOW_FILES : contiene
     WORKFLOW_FILES ||--o{ FRONTMATTER_ATTRIBUTES : tiene
+    WORKFLOW_FILES ||--|| WORKFLOW_LOCKS : compila_a
 
     REPOSITORIES {
         int repo_id PK
@@ -20,9 +21,16 @@ erDiagram
         int repo_id FK
         string file_name
         string file_path
-        bool has_lock
         string raw_frontmatter
         string body_markdown
+        string fetched_at
+    }
+    WORKFLOW_LOCKS {
+        int lock_id PK
+        int file_id FK
+        string file_name
+        string file_path
+        string raw_content
         string fetched_at
     }
     FRONTMATTER_ATTRIBUTES {
@@ -39,7 +47,27 @@ erDiagram
 | Relación | Cardinalidad | Significado |
 |---|---|---|
 | `repositories` → `workflow_files` | 1 : N (0 o más) | Un repositorio puede tener uno o varios archivos `.md` de GH-AW; cada archivo pertenece a exactamente un repositorio. |
+| `workflow_files` → `workflow_locks` | 1 : 1 (exactamente uno) | Cada archivo `.md` tiene exactamente un `.lock.yml`/`.lock.yaml` compilado — es la definición de "usa GH-AW" de este proyecto (ver `detector.matching_file_pairs`), y `extraction.py` solo registra el par como resuelto si **ambos** archivos se descargaron con éxito. |
 | `workflow_files` → `frontmatter_attributes` | 1 : N (0 o más) | Un archivo de workflow puede tener uno o varios atributos de frontmatter (o ninguno, si el frontmatter estaba vacío o no se pudo interpretar); cada atributo pertenece a exactamente un archivo. |
+
+## Por qué `workflow_locks` es una tabla aparte (y no aplanada)
+
+El `.lock.yml` es el workflow **compilado**: YAML de GitHub Actions
+generado a partir del `.md` fuente, sin la variabilidad de esquema del
+frontmatter (no hay campos "opcionales" que aparezcan o no de workflow en
+workflow de la misma forma). Por eso se modela distinto de
+`frontmatter_attributes`:
+
+- **Tabla propia** (no una columna extra en `workflow_files`): son dos
+  archivos físicos independientes en el repo de origen, con su propio
+  nombre, ruta y momento de descarga — modelarlos como dos entidades 1:1
+  es más fiel al dominio, y deja lugar para metadatos propios del `.lock`
+  a futuro sin tocar `workflow_files`.
+- **Contenido como texto plano** (`raw_content`), no aplanado a EAV: a
+  diferencia del frontmatter, el `.lock.yml` es contenido generado/
+  compilado — aplanarlo en pares clave-valor no aportaría una unidad de
+  análisis útil (son cientos de líneas de definición de jobs de GitHub
+  Actions), solo ruido.
 
 ## Por qué `frontmatter_attributes` es una tabla clave-valor (EAV)
 

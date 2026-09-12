@@ -1,12 +1,18 @@
 """
-Construye las tablas relacionadas del dataset (repositorios, archivos de
-workflow, atributos de frontmatter) en memoria, a partir de contenido .md ya
-descargado. Sigue el esquema entidad-relación acordado:
+Construye las tablas relacionadas del dataset (repositorios, archivos .md
+de workflow, archivos .lock compilados, atributos de frontmatter) en
+memoria, a partir de contenido ya descargado. Sigue el esquema
+entidad-relación acordado:
 
   repositories (1) ----< (N) workflow_files (1) ----< (N) frontmatter_attributes
+                                    |
+                                    +----1:1---- workflow_locks
 
 - `raw_frontmatter` y `body_markdown` viven como columnas de workflow_files
-  porque son 1:1 con el archivo (no vale la pena normalizarlos aparte).
+  porque son 1:1 con el archivo .md (no vale la pena normalizarlos aparte).
+  Por la misma razón, `workflow_locks` guarda el YAML compilado del .lock
+  como texto plano en una columna (`raw_content`), no aplanado: es
+  contenido generado/compilado, no un frontmatter con estructura variable.
 - `frontmatter_attributes` es una tabla EAV (clave-valor aplanada) porque el
   frontmatter de gh-aw no tiene un esquema fijo entre workflows distintos.
 
@@ -31,25 +37,27 @@ WORKFLOW_FILES_COLUMNS = [
     "repo_id",
     "file_name",
     "file_path",
-    "has_lock",
     "raw_frontmatter",
     "body_markdown",
     "fetched_at",
 ]
+WORKFLOW_LOCKS_COLUMNS = ["lock_id", "file_id", "file_name", "file_path", "raw_content", "fetched_at"]
 FRONTMATTER_ATTRIBUTES_COLUMNS = ["attribute_id", "file_id", "key_path", "value", "value_type"]
 
 
 class DatasetBuilder:
-    """Acumula filas para las 3 tablas del esquema y las expone como DataFrames."""
+    """Acumula filas para las 4 tablas del esquema y las expone como DataFrames."""
 
     def __init__(self) -> None:
         self._repo_ids = itertools.count(1)
         self._file_ids = itertools.count(1)
+        self._lock_ids = itertools.count(1)
         self._attribute_ids = itertools.count(1)
         self._repo_id_by_full_name: Dict[str, int] = {}
 
         self.repositories: List[Dict[str, Any]] = []
         self.workflow_files: List[Dict[str, Any]] = []
+        self.workflow_locks: List[Dict[str, Any]] = []
         self.frontmatter_attributes: List[Dict[str, Any]] = []
 
     @property
@@ -75,17 +83,22 @@ class DatasetBuilder:
         name: str,
         file_name: str,
         file_path: str,
-        has_lock: bool,
         raw_content: str,
+        lock_file_name: str,
+        lock_file_path: str,
+        lock_raw_content: str,
         fetched_at: Optional[str] = None,
     ) -> int:
         """
-        Registra un archivo .md ya descargado: separa frontmatter y body, y
-        agrega las filas correspondientes a las 3 tablas. Devuelve el
-        file_id asignado (útil para trazabilidad en logs de la CLI).
+        Registra un par .md + .lock ya descargado: separa frontmatter y
+        body del .md, y agrega las filas correspondientes a las 4 tablas
+        (el .lock se agrega tal cual, como una fila 1:1 de
+        workflow_locks). Devuelve el file_id asignado (útil para
+        trazabilidad en logs de la CLI).
         """
         repo_id = self._get_or_create_repo_id(owner, name)
         file_id = next(self._file_ids)
+        fetched_at = fetched_at or datetime.now(timezone.utc).isoformat()
 
         metadata, body = parse_markdown(raw_content)
 
@@ -95,10 +108,9 @@ class DatasetBuilder:
                 "repo_id": repo_id,
                 "file_name": file_name,
                 "file_path": file_path,
-                "has_lock": has_lock,
                 "raw_frontmatter": json.dumps(metadata, ensure_ascii=False, default=str),
                 "body_markdown": body,
-                "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
+                "fetched_at": fetched_at,
             }
         )
 
@@ -113,13 +125,25 @@ class DatasetBuilder:
                 }
             )
 
+        self.workflow_locks.append(
+            {
+                "lock_id": next(self._lock_ids),
+                "file_id": file_id,
+                "file_name": lock_file_name,
+                "file_path": lock_file_path,
+                "raw_content": lock_raw_content,
+                "fetched_at": fetched_at,
+            }
+        )
+
         return file_id
 
     def to_dataframes(self) -> Dict[str, pd.DataFrame]:
-        """Devuelve las 3 tablas como DataFrames, con columnas fijas aunque estén vacías."""
+        """Devuelve las 4 tablas como DataFrames, con columnas fijas aunque estén vacías."""
         return {
             "repositories": pd.DataFrame(self.repositories, columns=REPOSITORIES_COLUMNS),
             "workflow_files": pd.DataFrame(self.workflow_files, columns=WORKFLOW_FILES_COLUMNS),
+            "workflow_locks": pd.DataFrame(self.workflow_locks, columns=WORKFLOW_LOCKS_COLUMNS),
             "frontmatter_attributes": pd.DataFrame(
                 self.frontmatter_attributes, columns=FRONTMATTER_ATTRIBUTES_COLUMNS
             ),
@@ -127,7 +151,7 @@ class DatasetBuilder:
 
 
 # La escritura a .parquet vive en parquet_writer.write_parquet_tables (que además
-# valida que estén las 3 tablas del esquema). Este módulo solo arma las tablas.
+# valida que estén las 4 tablas del esquema). Este módulo solo arma las tablas.
 
 
 def build_dataset_from_checkpoint(checkpoint_records: Dict[str, dict]) -> DatasetBuilder:
@@ -138,8 +162,10 @@ def build_dataset_from_checkpoint(checkpoint_records: Dict[str, dict]) -> Datase
     ignoran acá -- quedan para reintentarse en otra corrida de extracción,
     no deben aparecer en el dataset como si fueran "sin frontmatter".
 
-    Como extraction.py solo descarga pares .md + .lock ya confirmados (ver
-    detector.matching_file_pairs), has_lock es siempre True en este dataset.
+    Como extraction.py solo escribe status "ok" cuando se pudo descargar
+    tanto el .md como su .lock (ver extract_repo), cada registro "ok" aporta
+    exactamente una fila a workflow_files y una a workflow_locks -- se
+    mantiene la relación 1:1 entre ambas tablas.
     """
     builder = DatasetBuilder()
     for record in checkpoint_records.values():
@@ -150,8 +176,10 @@ def build_dataset_from_checkpoint(checkpoint_records: Dict[str, dict]) -> Datase
             name=record["name"],
             file_name=record["file_name"],
             file_path=record["file_path"],
-            has_lock=True,
             raw_content=record["raw_content"],
+            lock_file_name=record["lock_file_name"],
+            lock_file_path=record["lock_file_path"],
+            lock_raw_content=record["lock_raw_content"],
             fetched_at=record.get("fetched_at"),
         )
     return builder
