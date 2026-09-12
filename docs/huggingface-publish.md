@@ -56,6 +56,7 @@ dataset/
 ├── README.md                    (la dataset card, con front-matter YAML)
 ├── repositories.parquet
 ├── workflow_files.parquet
+├── workflow_locks.parquet
 └── frontmatter_attributes.parquet
 ```
 
