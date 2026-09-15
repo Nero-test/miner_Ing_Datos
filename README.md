@@ -61,7 +61,11 @@ miner/
 ├── eda/                        # análisis exploratorio del dataset (Tarea 4)
 │   ├── 01_descripcion_y_calidad.ipynb
 │   ├── 02_exploracion_y_hallazgos.ipynb
-│   └── README.md
+│   ├── README.md
+│   └── tarea_5/                # evolución de archivos GH-AW entre versiones (Tarea 5)
+│       ├── 01_preparacion_y_agregaciones.ipynb
+│       ├── 02_boxplots_y_evolucion.ipynb
+│       └── README.md
 ├── src/
 │   └── miner/
 │       ├── cli.py                 # interfaz de línea de comandos (Typer): mine + extract
@@ -336,6 +340,18 @@ kernel del entorno virtual y el orden de ejecución) están en
 — 338 repositorios, 1.390 archivos de workflow (cada uno con su `.lock`
 correspondiente) y 58.281 atributos de frontmatter (instantánea del
 2026-09-12).
+
+### Evolución entre versiones (`eda/tarea_5/`)
+
+El subdirectorio [`eda/tarea_5/`](eda/tarea_5/) contiene un segundo análisis,
+independiente del anterior: en vez del dataset propio de Miner (un único
+snapshot por archivo), usa el dataset externo
+[GHAW-H](https://huggingface.co/datasets/pavtch/GHAW-H) —que sí tiene
+historial de versiones por archivo— para estudiar cómo cambian la longitud
+del body, el tamaño del frontmatter y el tiempo entre versiones consecutivas
+de un mismo workflow, agregado por archivo y por mes y visualizado con
+boxplots. Instrucciones completas (versión del dataset, obtención de datos
+y ejecución) en [`eda/tarea_5/README.md`](eda/tarea_5/README.md).
 
 ## Ejecutar las pruebas
 

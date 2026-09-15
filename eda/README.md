@@ -101,3 +101,13 @@ kernel, cámbialo desde el menú *Kernel → Change Kernel*.
 Ambos notebooks conservan sus salidas de ejecución (tablas, gráficos,
 interpretaciones) tal como quedaron guardadas, para poder revisarlas
 directamente desde GitHub sin tener que volver a ejecutarlos.
+
+## Tarea 5: evolución entre versiones
+
+[`tarea_5/`](tarea_5/) es un análisis **independiente** de este: no usa el
+dataset propio de Miner (que es un único snapshot por archivo) sino el
+dataset externo [GHAW-H](https://huggingface.co/datasets/pavtch/GHAW-H),
+que sí tiene historial de versiones, para estudiar cómo cambian los
+archivos GH-AW entre versiones consecutivas. Tiene su propio
+[`README.md`](tarea_5/README.md) con instrucciones de obtención de datos y
+ejecución.
