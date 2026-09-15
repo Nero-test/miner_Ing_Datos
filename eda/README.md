@@ -11,7 +11,7 @@ partir de repositorios de GitHub que usan
 
 | Notebook | Contenido |
 |---|---|
-| [`01_descripcion_y_calidad.ipynb`](01_descripcion_y_calidad.ipynb) | Carga de los datos, descripción de las 3 tablas y sus relaciones, revisión de calidad, y tratamiento de los problemas encontrados. |
+| [`01_descripcion_y_calidad.ipynb`](01_descripcion_y_calidad.ipynb) | Carga de los datos, descripción de las 4 tablas y sus relaciones (incluida la 1:1 entre `workflow_files` y `workflow_locks`), revisión de calidad, y tratamiento de los problemas encontrados. |
 | [`02_exploracion_y_hallazgos.ipynb`](02_exploracion_y_hallazgos.ipynb) | Distribución de archivos por repositorio, exploración del frontmatter y el body, preguntas exploratorias, y hallazgos/limitaciones. |
 
 **Ejecutar en orden**: primero `01_descripcion_y_calidad.ipynb` (genera
@@ -21,12 +21,13 @@ de que el primero siga en memoria).
 
 ## 1. Obtener los datos
 
-Coloca las 3 tablas del dataset en `eda/data/raw/`:
+Coloca las 4 tablas del dataset en `eda/data/raw/`:
 
 ```
 eda/data/raw/
 ├── repositories.parquet
 ├── workflow_files.parquet
+├── workflow_locks.parquet
 └── frontmatter_attributes.parquet
 ```
 

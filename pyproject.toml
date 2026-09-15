@@ -20,11 +20,15 @@ dev = [
     "pytest>=8.0",
 ]
 # Dependencias solo para los notebooks de eda/ (no son necesarias para la CLI).
+# tornado<6.5: jupyter_server 2.21.0 rompe con tornado>=6.5 (FileFindHandler
+# no tiene 'allowed_symlink_directory'), causando 500 en todos los assets
+# estáticos de JupyterLab (pantalla en blanco).
 eda = [
     "jupyterlab>=4.0",
     "ipykernel>=6.0",
     "matplotlib>=3.8",
     "seaborn>=0.13",
+    "tornado<6.5",
 ]
 
 [project.scripts]

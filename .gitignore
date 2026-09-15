@@ -20,6 +20,9 @@ build/
 htmlcov/
 .coverage
 
+# Jupyter (notebooks de eda/)
+.ipynb_checkpoints/
+
 # Editor
 .vscode/
 .idea/
